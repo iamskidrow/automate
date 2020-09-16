@@ -1,0 +1,108 @@
+#! /bin/bash
+
+# Author:	Ayon Chakraborty
+# Contact:	iamskidrow@gmail.com
+
+site=$1
+domain=$(echo $site | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+httpcode="200,204,401,403,406"
+threads="250"
+concurrency="50"
+depth="50"
+
+if [ -z "$1" ]
+then
+	echo "Bad Method"
+	exit
+fi
+
+cd $HOME
+
+#Check if "reports" exists
+if [ ! -d "$HOME/autocon" ]
+then
+mkdir $HOME/autocon
+fi
+
+cd $HOME/autocon
+
+# Make directory with the domain name. Delete Previous Scans (If there are any)
+if [ -d "$domain" ]
+then
+rm -rf $domain; mkdir $domain
+else
+mkdir $domain
+fi
+
+cd $domain
+
+# Gathers subdomains
+echo "Searching for SubDomains"
+subfinder -silent -nW -d $domain -t $threads | httprobe -c $threads | sort -u > subdomains.txt && cat subdomains.txt | sed 's/https\?:\/\///' | sort -u > subdomains-alt.txt
+
+# Extract Valid URLs Only
+echo "Pulling URLs"
+if [[ $2 = "no-subs" ]]; then
+	echo $domain | gau | sed 's/http:/https:/g' | httpx -silent -threads $threads -mc 200,204,401,403,406 -o urls.txt &> /dev/null
+else
+	cat subdomains-alt.txt | gau | sed 's/http:/https:/g' | httpx -silent -threads $threads -mc $httpcode -o urls.txt &> /dev/null
+fi
+
+#Extracting URL with Parameters
+echo "Extracting parameters"
+cat urls.txt | sed -e '/?/!d' -e '/=/!d' | qsreplace -a > parameters.txt
+
+#Spidering
+echo "Spidering for links and urls"
+if [[ $2 = "no-subs" ]]; then
+	gospider -s $site -o gospider.txt -c $concurrency -t $threads -d $depth --other-source -q -a &> /dev/null
+else
+	gospider -S subdomains.txt -o gospider.txt -c $concurrency -t $threads -d $depth --other-source -q -a &> /dev/null
+fi
+
+# Extract Endpoints from JS File
+# cat main.js | grep -oh "\"\/[a-zA-Z0-9_/?=&]*\"" | sed -e 's/^"//' -e 's/"$//' | sort -u
+
+# Extract IPs from a File
+# grep -E -o '(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)' file.txt
+
+# Extract Endpoints from swagger.json
+# curl -s https://domain.tld/v2/swagger.json | jq '.paths | keys[]'
+
+# Get all the urls out of a sitemap.xml
+# curl -s domain.com/sitemap.xml | xmllint --format - | grep -e 'loc' | sed -r 's|</?loc>||g'
+
+# CMS Checking
+# cmsmap -t $threads -i subdomains.txt --E
+
+# Port Scanning
+echo "Scanning for Open Ports"
+if [[ $2 = "no-subs" ]]; then
+	naabu -t $threads -silent -host $domain &> /dev/null
+else
+	naabu -hL subdomains-alt.txt -t 100 -silent &> /dev/null
+fi
+
+# Check for WAF
+echo "Checking for Firewalls"
+wafw00f -i subdomains.txt -o waf.txt &> /dev/null
+
+# Subdomain takeover check
+echo "Checking for Subdomain takeovers"
+subjack -a -ssl -w subdomains.txt -t $threads -o takeover.txt &> /dev/null
+
+# Nuclei
+echo "Nuclei is fuzzing for bugs"
+mkdir nuclei
+nuclei -silent -c $concurrency -l subdomains.txt -t cves/ -o nuclei/cves.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t dns/ -o nuclei/dns.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t files/ -o nuclei/files.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t generic-detections/ -o nuclei/generic-detections.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t panels/ -o nuclei/panels.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t security-misconfiguration/ -o nuclei/security-misconfiguration.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t subdomain-takeover/ -o nuclei/subdomain-takeover.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t technologies/ -o nuclei/technologies.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t vulnerabilities/ -o nuclei/vulnerabilities.txt
+
+# Fuzz
+# gobuster
