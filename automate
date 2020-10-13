@@ -72,9 +72,6 @@ fi
 # Get all the urls out of a sitemap.xml
 # curl -s domain.com/sitemap.xml | xmllint --format - | grep -e 'loc' | sed -r 's|</?loc>||g'
 
-# CMS Checking
-# cmsmap -t $threads -i subdomains.txt --E
-
 # Port Scanning
 echo "Scanning for Open Ports"
 if [[ $2 = "no-subs" ]]; then
@@ -97,10 +94,12 @@ mkdir nuclei
 nuclei -silent -c $concurrency -l subdomains.txt -t cves/ -o nuclei/cves.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t dns/ -o nuclei/dns.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t files/ -o nuclei/files.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t fuzzing/ -o nuclei/fuzzing.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t generic-detections/ -o nuclei/generic-detections.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t panels/ -o nuclei/panels.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t security-misconfiguration/ -o nuclei/security-misconfiguration.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t subdomain-takeover/ -o nuclei/subdomain-takeover.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t tokens/ -o nuclei/tokens.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t technologies/ -o nuclei/technologies.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t vulnerabilities/ -o nuclei/vulnerabilities.txt
 
