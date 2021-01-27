@@ -3,28 +3,38 @@
 # Author:	Ayon Chakraborty
 # Contact:	iamskidrow@gmail.com
 
-site=$1
+while getopts d:t:c: flag
+do
+case "${flag}" in
+d) site=${OPTARG};;
+t) threads=${OPTARG};;
+c) concurrency=${OPTARG};;
+esac
+done
+
 domain=$(echo $site | sed -e 's|^[^/]*//||' -e 's|/.*$||')
 httpcode="200,204,401,403,406"
-threads="250"
-concurrency="50"
-depth="50"
+depth="20"
 
-if [ -z "$1" ]
-then
-	echo "Bad Method"
-	exit
+if [[ -z $site || -z $threads || -z $concurrency ]]; then
+  echo "Enter site url with protocol and set threads and concurrency"
+  echo ""
+  echo "Usage:"
+  echo "-d https://www.domain.com [Domain URL]"
+  echo "-t 50 [Numbers of threads]"
+  echo "-c 25 [Number of concurrent requests]"
+  exit 1
 fi
 
 cd $HOME
 
 #Check if "reports" exists
-if [ ! -d "$HOME/autocon" ]
+if [ ! -d "$HOME/automate" ]
 then
-mkdir $HOME/autocon
+mkdir $HOME/automate
 fi
 
-cd $HOME/autocon
+cd $HOME/automate
 
 # Make directory with the domain name. Delete Previous Scans (If there are any)
 if [ -d "$domain" ]
@@ -73,12 +83,12 @@ fi
 # curl -s domain.com/sitemap.xml | xmllint --format - | grep -e 'loc' | sed -r 's|</?loc>||g'
 
 # Port Scanning
-echo "Scanning for Open Ports"
-if [[ $2 = "no-subs" ]]; then
-	naabu -t $threads -silent -host $domain &> /dev/null
-else
-	naabu -hL subdomains-alt.txt -t 100 -silent &> /dev/null
-fi
+# echo "Scanning for Open Ports"
+# if [[ $2 = "no-subs" ]]; then
+# 	naabu -t $threads -silent -host $domain &> /dev/null
+# else
+# 	naabu -hL subdomains-alt.txt -t 100 -silent &> /dev/null
+# fi
 
 # Check for WAF
 echo "Checking for Firewalls"
@@ -92,16 +102,19 @@ subjack -a -ssl -w subdomains.txt -t $threads -o takeover.txt &> /dev/null
 echo "Nuclei is fuzzing for bugs"
 mkdir nuclei
 nuclei -silent -c $concurrency -l subdomains.txt -t cves/ -o nuclei/cves.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t default-logins/ -o nuclei/default-logins.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t dns/ -o nuclei/dns.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t files/ -o nuclei/files.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t fuzzing/ -o nuclei/fuzzing.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t generic-detections/ -o nuclei/generic-detections.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t panels/ -o nuclei/panels.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t security-misconfiguration/ -o nuclei/security-misconfiguration.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t subdomain-takeover/ -o nuclei/subdomain-takeover.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t tokens/ -o nuclei/tokens.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t exposed-panels/ -o nuclei/exposed-panels.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t exposed-tokens/ -o nuclei/exposed-tokens.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t exposures/ -o nuclei/exposures.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t helpers/ -o nuclei/helpers.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t miscellaneous/ -o nuclei/miscellaneous.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t misconfiguration/ -o nuclei/misconfiguration.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t takeover/ -o nuclei/takeover.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t technologies/ -o nuclei/technologies.txt
 nuclei -silent -c $concurrency -l subdomains.txt -t vulnerabilities/ -o nuclei/vulnerabilities.txt
+nuclei -silent -c $concurrency -l subdomains.txt -t workflows/ -o nuclei/workflows.txt
 
 # Fuzz
 # gobuster
