@@ -1,8 +1,8 @@
-#! /bin/bash
+# Ayon Chakraborty
+# iamskidrow@gmail.com
 
-# Author:	Ayon Chakraborty
-# Contact:	iamskidrow@gmail.com
 
+# Parameter setup
 while getopts d:t:c: flag
 do
 case "${flag}" in
@@ -12,109 +12,120 @@ c) concurrency=${OPTARG};;
 esac
 done
 
+
+# Variables
 domain=$(echo $site | sed -e 's|^[^/]*//||' -e 's|/.*$||')
 httpcode="200,204,401,403,406"
 depth="20"
+folder="$HOME/Automate"
 
+
+# Checking parameters before execution
 if [[ -z $site || -z $threads || -z $concurrency ]]; then
+  echo ""
   echo "Enter site url with protocol and set threads and concurrency"
   echo ""
   echo "Usage:"
   echo "-d https://www.domain.com [Domain URL]"
   echo "-t 50 [Numbers of threads]"
   echo "-c 25 [Number of concurrent requests]"
+  echo "Add 'no-subs' parameter if you wish to skip Subdomains"
+  echo ""
   exit 1
 fi
 
+
 cd $HOME
+start_time=$(date +%s)
 
-#Check if "reports" exists
-if [ ! -d "$HOME/automate" ]
+
+#Check if "Automate" exists in $HOME
+if [ ! -d "$folder" ]
 then
-mkdir $HOME/automate
+mkdir $folder 
 fi
 
-cd $HOME/automate
-
-# Make directory with the domain name. Delete Previous Scans (If there are any)
-if [ -d "$domain" ]
+if [ -d "$folder/$domain" ] # Replacing if there are any previous directories
 then
-rm -rf $domain; mkdir $domain
+rm -rf "$folder/$domain"; mkdir "$folder/$domain"
 else
-mkdir $domain
+mkdir "$folder/$domain" # Making a folder with the domain name
 fi
 
-cd $domain
+cd "$folder/$domain"
+
+# Path of scan data
+clear
+echo "Note: The data will be saved under $folder/$domain/"
+
 
 # Gathers subdomains
-echo "Searching for SubDomains"
-subfinder -silent -nW -d $domain -t $threads | httprobe -c $threads | sort -u > subdomains.txt && cat subdomains.txt | sed 's/https\?:\/\///' | sort -u > subdomains-alt.txt
+echo ""
+echo "[+] Searching for SubDomains"
+subfinder -silent -nW -d $domain -t $threads | httprobe -c $threads | sort -u > subdomains.txt && cat subdomains.txt | sed -e 's|^[^/]*//||' -e 's|/.*$||' | sort -u > subdomains-alt.txt
+
 
 # Extract Valid URLs Only
-echo "Pulling URLs"
+echo "[+] Pulling URLs"
 if [[ $2 = "no-subs" ]]; then
 	echo $domain | gau | sed 's/http:/https:/g' | httpx -silent -threads $threads -mc 200,204,401,403,406 -o urls.txt &> /dev/null
 else
 	cat subdomains-alt.txt | gau | sed 's/http:/https:/g' | httpx -silent -threads $threads -mc $httpcode -o urls.txt &> /dev/null
 fi
 
+
 #Extracting URL with Parameters
-echo "Extracting parameters"
+echo "[+] Extracting parameters"
 cat urls.txt | sed -e '/?/!d' -e '/=/!d' | qsreplace -a > parameters.txt
 
-#Spidering
-echo "Spidering for links and urls"
-if [[ $2 = "no-subs" ]]; then
-	gospider -s $site -o gospider.txt -c $concurrency -t $threads -d $depth --other-source -q -a &> /dev/null
-else
-	gospider -S subdomains.txt -o gospider.txt -c $concurrency -t $threads -d $depth --other-source -q -a &> /dev/null
-fi
 
 # Extract Endpoints from JS File
 # cat main.js | grep -oh "\"\/[a-zA-Z0-9_/?=&]*\"" | sed -e 's/^"//' -e 's/"$//' | sort -u
 
+
 # Extract IPs from a File
 # grep -E -o '(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)' file.txt
+
 
 # Extract Endpoints from swagger.json
 # curl -s https://domain.tld/v2/swagger.json | jq '.paths | keys[]'
 
+
 # Get all the urls out of a sitemap.xml
 # curl -s domain.com/sitemap.xml | xmllint --format - | grep -e 'loc' | sed -r 's|</?loc>||g'
 
+
 # Port Scanning
-# echo "Scanning for Open Ports"
-# if [[ $2 = "no-subs" ]]; then
-# 	naabu -t $threads -silent -host $domain &> /dev/null
-# else
-# 	naabu -hL subdomains-alt.txt -t 100 -silent &> /dev/null
-# fi
+echo "[+] Scanning for Open Ports"
+if [[ $2 = "no-subs" ]]; then
+	naabu -t $threads -silent -host $domain &> /dev/null
+else
+	naabu -hL subdomains-alt.txt -t 100 -silent &> /dev/null
+fi
+
 
 # Check for WAF
-echo "Checking for Firewalls"
+echo "[+] Checking for Firewalls"
 wafw00f -i subdomains.txt -o waf.txt &> /dev/null
 
+
 # Subdomain takeover check
-echo "Checking for Subdomain takeovers"
+echo "[+] Checking for Subdomain takeovers"
 subjack -a -ssl -w subdomains.txt -t $threads -o takeover.txt &> /dev/null
 
+
 # Nuclei
-echo "Nuclei is fuzzing for bugs"
-mkdir nuclei
-nuclei -silent -c $concurrency -l subdomains.txt -t cves/ -o nuclei/cves.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t default-logins/ -o nuclei/default-logins.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t dns/ -o nuclei/dns.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t fuzzing/ -o nuclei/fuzzing.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t exposed-panels/ -o nuclei/exposed-panels.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t exposed-tokens/ -o nuclei/exposed-tokens.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t exposures/ -o nuclei/exposures.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t helpers/ -o nuclei/helpers.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t miscellaneous/ -o nuclei/miscellaneous.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t misconfiguration/ -o nuclei/misconfiguration.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t takeover/ -o nuclei/takeover.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t technologies/ -o nuclei/technologies.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t vulnerabilities/ -o nuclei/vulnerabilities.txt
-nuclei -silent -c $concurrency -l subdomains.txt -t workflows/ -o nuclei/workflows.txt
+echo "[+] Nuclei is fuzzing for bugs"
+nuclei -silent -l urls.txt -t cnvd/ -t cves/ -t default-logins/ -t exposures/ -t file/ -t fuzzing/ -t headless/ -t miscellaneous/ -t misconfiguration/ -t network/ -t takeovers/ -t vulnerabilities/ -t workflows/ -c $concurrency -o nuclei.txt 
+
+# Sqlmap
+echo "Checking for sql injections"
+mkdir sqlmap
+sqlmap -m parameters.txt --answers="follow=Y" --batch --threads 10 --random-agent --ignore-proxy --dbs --output-dir="$folder/$domain/sqlmap"
+
 
 # Fuzz
 # gobuster
+
+end_time=$(date +%s)
+echo "Elapsed Time: $(($end_time - $start_time)) Seconds"
