@@ -1,0 +1,99 @@
+{
+  "packages": [
+    {
+      "type": "go",
+      "name": "dwisiswant0/crlfuzz@latest",
+      "description": ""
+    },
+    {
+      "type": "go",
+      "name": "hahwul/dalfox@latest",
+      "description": ""
+    },
+    {
+      "type": "go",
+      "name": "haccer/subjack@latest",
+      "description": ""
+    },
+    {
+      "type": "go",
+      "name": "hakluke/hakcheckurl@latest",
+      "description": "Check URLs for various issues"
+    },
+    {
+      "type": "go",
+      "name": "hakluke/hakrawler@latest",
+      "description": "Web crawler for gathering URLs"
+    },
+    {
+      "type": "go",
+      "name": "hakluke/hakrevdns@latest",
+      "description": "Reverse DNS lookup tool"
+    },
+    {
+      "type": "go",
+      "name": "jaeles-project/gospider@latest",
+      "description": "Fast web spider"
+    },
+    {
+      "type": "go",
+      "name": "tomnomnom/anew@latest",
+      "description": "Append lines to files if they don't exist"
+    },
+    {
+      "type": "go",
+      "name": "tomnomnom/assetfinder@latest",
+      "description": "Find domains related to a given domain"
+    },
+    {
+      "type": "go",
+      "name": "tomnomnom/gf@latest",
+      "description": "A wrapper around grep to avoid typing common patterns"
+    },
+    {
+      "type": "go",
+      "name": "tomnomnom/httprobe@latest",
+      "description": "Take a list of domains and probe for working HTTP servers"
+    },
+    {
+      "type": "go",
+      "name": "tomnomnom/qsreplace@latest",
+      "description": ""
+    },
+    {
+      "type": "go",
+      "name": "tomnomnom/waybackurls@latest",
+      "description": "Fetch URLs from the Wayback Machine"
+    }
+  ],
+  "package_mappings": {
+    "apt": {
+      "dnsx": "dns-tools",
+      "ffuf": "ffuf",
+      "nmap": "nmap",
+      "wireshark": "wireshark"
+    },
+    "dnf": {
+      "nmap": "nmap",
+      "wireshark": "wireshark"
+    },
+    "yum": {
+      "nmap": "nmap",
+      "wireshark": "wireshark"
+    },
+    "pacman": {
+      "nmap": "nmap",
+      "wireshark": "wireshark"
+    }
+  },
+  "environment": {
+    "GOPATH": "$HOME/go",
+    "GOBIN": "$HOME/go/bin",
+    "PATH": "$PATH:$HOME/go/bin"
+  },
+  "post_install": [
+    "mkdir -p ~/.gf",
+    "test -d ~/.gf/patterns || git clone https://github.com/tomnomnom/gf ~/.gf/patterns",
+    "echo 'Installation complete!'"
+  ]
+}
