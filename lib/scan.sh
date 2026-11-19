@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Active testing: WAF, CORS, takeover, CRLF, hidden params, gf triage, Nuclei, XSS, SQLi, fuzzing, CVE context.
+# Active testing: WAF, CORS, takeover, CRLF, hidden params, gf triage,
+# Nuclei (templates + DAST), XSS, SQLi, fuzzing, WordPress, cloud, CVE context.
 
 scan_waf(){
   need hosts.live.txt || return; have wafw00f || { skip 'wafw00f missing'; return; }
@@ -19,10 +20,16 @@ scan_cors(){
   done <"$RUN/hosts.live.txt"
 }
 
+# Takeover across ALL passive names (incl. dangling): dnsReaper if present, else Nuclei templates.
 scan_takeover(){
-  need hosts.passive.txt || return; have subjack || { skip 'subjack missing'; return; }
-  local fp=/usr/share/subjack/fingerprints.json; [[ -f $fp ]] || fp=''
-  run "$RUN/raw/subjack.out" subjack subjack -w "$RUN/hosts.passive.txt" -t "$THREADS" -ssl ${fp:+-c "$fp"} -o "$RUN/raw/subjack.txt"
+  need hosts.passive.txt || return
+  if have dnsreaper; then
+    run "$RUN/raw/dnsreaper.txt" takeover dnsreaper file --filename "$RUN/hosts.passive.txt"
+  elif have nuclei; then
+    local -a a=(-l "$RUN/hosts.passive.txt" -tags takeover -jsonl -silent -duc -rl "$RATE" -c "$CONCURRENCY" -timeout "$HTTP_TIMEOUT" -retries "$RETRIES")
+    ((ENABLE_OOB)) || a+=(-ni)
+    run "$RUN/raw/takeover.jsonl" takeover nuclei "${a[@]}"
+  else skip 'no takeover tool'; fi
 }
 
 scan_crlf(){
@@ -30,18 +37,23 @@ scan_crlf(){
   run "$RUN/raw/crlfuzz.out" crlfuzz crlfuzz -l "$RUN/hosts.live.txt" -c "$CONCURRENCY" -s -o "$RUN/raw/crlf.txt"
 }
 
-# Hidden GET parameters on a few representative endpoints; feeds the parameter inventory.
+# Hidden GET parameters on representative endpoints (x8 if installed, else arjun).
 scan_hidden_params(){
   : >"$RUN/parameters.hidden.txt"
-  need urls.live.txt || return; have arjun || { skip 'arjun missing'; return; }
+  need urls.live.txt || return
   awk '{l=tolower($0); if(l~/\.(png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|css|js|pdf|zip|mp4)(\?|$)/)next;
-    h=l;sub(/^https?:\/\//,"",h);sub(/\/.*/,"",h); if(!seen[h]++)print}' "$RUN/urls.live.txt" | head -n 5 >"$RUN/arjun.selected.txt"
-  [[ -s $RUN/arjun.selected.txt ]] || { skip 'no eligible endpoints'; return; }
-  run "$RUN/raw/arjun.out" arjun arjun -i "$RUN/arjun.selected.txt" -m GET -t "$THREADS" --rate-limit "$RATE" --disable-redirects -oJ "$RUN/raw/arjun.json"
-  [[ -s $RUN/raw/arjun.json ]] || return 0
-  jq -r 'to_entries[]|.key as $u|.value.params[]?|(if type=="string" then . else (.name//empty) end)|select(test("^[A-Za-z0-9_-]{1,80}$"))|$u+(if ($u|contains("?")) then "&" else "?" end)+.+"=1"' \
-    "$RUN/raw/arjun.json" 2>/dev/null >"$RUN/raw/arjun.urls.raw" || true
-  filter_urls "$RUN/raw/arjun.urls.raw" "$RUN/parameters.hidden.txt"
+    h=l;sub(/^https?:\/\//,"",h);sub(/\/.*/,"",h); if(!seen[h]++)print}' "$RUN/urls.live.txt" | head -n 5 >"$RUN/pd.selected.txt"
+  [[ -s $RUN/pd.selected.txt ]] || { skip 'no eligible endpoints'; return; }
+  if have x8; then
+    run "$RUN/raw/x8.txt" x8 x8 -u "$RUN/pd.selected.txt" -O url -o "$RUN/raw/x8.out"
+    [[ -f $RUN/raw/x8.out ]] && filter_urls "$RUN/raw/x8.out" "$RUN/parameters.hidden.txt"
+  elif have arjun; then
+    run "$RUN/raw/arjun.out" arjun arjun -i "$RUN/pd.selected.txt" -m GET -t "$THREADS" --rate-limit "$RATE" --disable-redirects -oJ "$RUN/raw/arjun.json"
+    [[ -s $RUN/raw/arjun.json ]] || return 0
+    jq -r 'to_entries[]|.key as $u|.value.params[]?|(if type=="string" then . else (.name//empty) end)|select(test("^[A-Za-z0-9_-]{1,80}$"))|$u+(if ($u|contains("?")) then "&" else "?" end)+.+"=1"' \
+      "$RUN/raw/arjun.json" 2>/dev/null >"$RUN/raw/arjun.urls.raw" || true
+    filter_urls "$RUN/raw/arjun.urls.raw" "$RUN/parameters.hidden.txt"
+  else skip 'no parameter tool'; fi
 }
 
 # gf pattern triage: bucket URLs by likely vuln class to target downstream scanners.
@@ -58,12 +70,21 @@ scan_gf_triage(){
 # Single Nuclei pass over all live hosts: tag/severity filtered, templates compiled once.
 scan_nuclei(){
   need hosts.live.txt || return; have nuclei || { skip 'nuclei missing'; return; }
-  local out="$RUN/raw/nuclei.jsonl"; local -a a
-  a=(-l "$RUN/hosts.live.txt" -jsonl -silent -duc -tags "$NUCLEI_TAGS" -severity "$NUCLEI_SEVERITY"
+  local -a a=(-l "$RUN/hosts.live.txt" -jsonl -silent -duc -tags "$NUCLEI_TAGS" -severity "$NUCLEI_SEVERITY"
      -etags "$NUCLEI_EXCLUDE" -c "$CONCURRENCY" -rl "$RATE" -timeout "$HTTP_TIMEOUT" -retries "$RETRIES")
   ((ENABLE_OOB)) || a+=(-ni)
-  run "$out" nuclei nuclei "${a[@]}"
-  info "nuclei candidates: $(count "$out")"
+  run "$RUN/raw/nuclei.jsonl" nuclei nuclei "${a[@]}"
+  info "nuclei candidates: $(count "$RUN/raw/nuclei.jsonl")"
+}
+
+# DAST parameter fuzzing (open-redirect/SSRF/XSS/SQLi) over parameterized endpoints.
+scan_dast(){
+  need parameters.scan.txt || return; have nuclei || { skip 'nuclei missing'; return; }
+  local -a a=(-l "$RUN/parameters.scan.txt" -dast -jsonl -silent -duc -rl "$RATE" -c "$CONCURRENCY"
+     -timeout "$HTTP_TIMEOUT" -retries "$RETRIES" -etags "$NUCLEI_EXCLUDE")
+  ((ENABLE_OOB)) || a+=(-ni)
+  run "$RUN/raw/nuclei.dast.jsonl" dast nuclei "${a[@]}"
+  info "dast candidates: $(count "$RUN/raw/nuclei.dast.jsonl")"
 }
 
 # XSS on gf-triaged parameters when available, else all scan parameters.
@@ -75,9 +96,8 @@ scan_xss(){
   local rc=0
   run "$RUN/raw/dalfox.out" dalfox dalfox scan -i file "$in" --silence --rate-limit "$RATE" \
     --timeout "$HTTP_TIMEOUT" --scan-timeout "$TIMEOUT" --output "$RUN/raw/dalfox.txt" || rc=$?
-  # dalfox exit codes: 0 clean, 1 findings, 2 no scannable targets — none is a framework failure.
   ((rc==1)) && [[ -s $RUN/raw/dalfox.txt ]] && info 'dalfox reported candidates'
-  ((rc<=2)) && STAGE_ERR=0
+  ((rc<=2)) && STAGE_ERR=0   # 0 clean, 1 findings, 2 no scannable targets
   return 0
 }
 
@@ -104,11 +124,45 @@ scan_fuzz(){
   done <"$RUN/hosts.live.txt"
 }
 
-# CVE context for Nuclei-reported CVE IDs only (no inference from product names).
+# WordPress deep scan — only when WordPress is detected.
+scan_wordpress(){
+  have wpscan || { skip 'wpscan missing'; return; }
+  grep -qiE 'wp-content|wp-json|wp-includes|wordpress' "$RUN/urls.all.txt" "$RUN/technologies.jsonl" 2>/dev/null \
+    || { skip 'no WordPress detected'; return; }
+  grep -iE 'wp-content|wp-json|wp-includes' "$RUN/urls.all.txt" 2>/dev/null | grep -hoE 'https?://[^/"]+' | sort -u | head -n 2 >"$RUN/wp.hosts"
+  [[ -s $RUN/wp.hosts ]] || head -n 1 "$RUN/hosts.live.txt" >"$RUN/wp.hosts"
+  : >"$RUN/raw/wpscan.txt"; local u i=0
+  while IFS= read -r u; do scope_url "$u" || continue; i=$((i+1))
+    run "$RUN/raw/wpscan_$i.out" "wpscan_$i" wpscan --url "$u" --no-banner --random-user-agent --enumerate vp,u --format cli
+    { printf '\n### %s ###\n' "$u"; cat "$RUN/raw/wpscan_$i.out"; } >>"$RUN/raw/wpscan.txt"
+  done <"$RUN/wp.hosts"
+  # wpscan exits nonzero for findings or "not WordPress"; only a missing-DB error is a real failure.
+  grep -qiE 'Update required|database file is missing' "$RUN/raw/wpscan.txt" || STAGE_ERR=0
+  return 0
+}
+
+# Cloud bucket exposure (full scope only).
+scan_cloud(){
+  have cloud_enum || have s3scanner || { skip 'no cloud tools'; return; }
+  local kw=${DOMAIN%%.*}; : >"$RUN/raw/cloud_enum.txt"
+  if have cloud_enum; then
+    run "$RUN/raw/cloud_enum.out" cloud_enum cloud_enum -k "$kw" -k "$DOMAIN" -l "$RUN/raw/cloud_enum.log" --disable-azure --quickscan
+    cat "$RUN/raw/cloud_enum.log" "$RUN/raw/cloud_enum.out" 2>/dev/null >>"$RUN/raw/cloud_enum.txt" || true
+  fi
+  if have s3scanner; then
+    run "$RUN/raw/s3scanner.out" s3scanner s3scanner scan -bucket "$kw" || true
+    cat "$RUN/raw/s3scanner.out" 2>/dev/null >>"$RUN/raw/cloud_enum.txt" || true
+  fi
+  # bucket scanners exit nonzero when nothing is found; that is a result, not a failure.
+  [[ -s $RUN/raw/cloud_enum.txt ]] && STAGE_ERR=0
+  return 0
+}
+
+# CVE context for Nuclei-reported CVE IDs only.
 scan_vulnx(){
-  [[ -s $RUN/raw/nuclei.jsonl ]] || { skip 'no nuclei findings'; return; }
+  [[ -s $RUN/raw/nuclei.jsonl || -s $RUN/raw/nuclei.dast.jsonl ]] || { skip 'no nuclei findings'; return; }
   have vulnx || { skip 'vulnx missing'; return; }
-  grep -Eoi 'CVE-[0-9]{4}-[0-9]{4,}' "$RUN/raw/nuclei.jsonl" | LC_ALL=C sort -u >"$RUN/cve.ids.txt" || true
+  grep -hEoi 'CVE-[0-9]{4}-[0-9]{4,}' "$RUN"/raw/nuclei*.jsonl 2>/dev/null | LC_ALL=C sort -u >"$RUN/cve.ids.txt" || true
   [[ -s $RUN/cve.ids.txt ]] || { skip 'no CVE identifiers'; return; }
   run "$RUN/raw/vulnx.json" vulnx vulnx id --json --file "$RUN/cve.ids.txt"
 }

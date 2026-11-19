@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helpers: logging, the tool supervisor, scope/IP validation, stage plumbing.
 umask 077
-export PATH="$PATH:$(go env GOPATH 2>/dev/null || echo "$HOME/go")/bin"
+export PATH="$PATH:$(go env GOPATH 2>/dev/null || echo "$HOME/go")/bin:$HOME/.local/bin"
 
 # --- logging ---
 log(){ printf '[%s] %s\n' "$1" "$2" >&2; }

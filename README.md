@@ -22,7 +22,7 @@ One file, `config.sh`, holds every knob. Override per run from the environment:
 THREADS=100 CONCURRENCY=50 RATE=200 TIMEOUT=2400 MAX_URLS=0 ./automate.sh target.com --full
 ```
 
-| Knob | Meaning (applied to every tool) |
+| Knob | Applied to every tool |
 |------|------|
 | `THREADS` | worker threads |
 | `CONCURRENCY` | parallel hosts / fetchers |
@@ -32,23 +32,47 @@ THREADS=100 CONCURRENCY=50 RATE=200 TIMEOUT=2400 MAX_URLS=0 ./automate.sh target
 | `MAX_URLS` / `MAX_PARAMS` / `MAX_DNS` / `FUZZ_WORDS` | scope budgets (0 = unlimited) |
 | `NUCLEI_TAGS` / `NUCLEI_SEVERITY` | Nuclei coverage |
 
-## Layout
+## Pipeline
 
-```
-automate.sh       orchestrator (arg parse, scope, stage pipeline)
-config.sh         central configuration
-lib/core.sh       logging, scope/IP validation, tool supervisor, selection, stages
-lib/discover.sh   subdomains, permutations, DNS, live hosts
-lib/collect.sh    historical URLs, crawl, JS, inventory, parameters
-lib/enrich.sh     tech, TLS, headers, infra, ports, services, screenshots
-lib/scan.sh       WAF, CORS, takeover, CRLF, hidden params, gf triage, Nuclei, XSS, SQLi, fuzz, CVE
-lib/report.sh     summary.txt / findings.json / findings.csv / report.html
-install.sh        one-time dependency setup (APT + Go + gf patterns + Nuclei templates)
-```
+discover (subfinder/assetfinder → alterx → dnsx → httpx) → collect (waymore, katana, jsluice,
+trufflehog) → enrich (httpx/whatweb, tlsx/testssl, headers, cdncheck, naabu→nmap, gowitness) →
+active (wafw00f, cors, nuclei takeover, crlfuzz, gf triage, nuclei templates, nuclei `-dast`,
+dalfox, sqlmap, ffuf, wpscan, cloud_enum/s3scanner, vulnx) → anew diff → report.
+
+Scanners are targeted: gf triage feeds likely-vulnerable params to dalfox/sqlmap, wpscan runs only
+on detected WordPress, cloud runs only in `--full`, and each stage skips cleanly when it has no input.
 
 ## Output
 
-`~/Automate/<domain>/<UTC>/` — `reports/` (summary, findings, html), `results/`* inventories,
-`raw/` per-tool output, `logs/` per-tool stderr, `stages.tsv`, `commands.tsv`.
+```
+~/Automate/<domain>/<timestamp>/
+  REPORT.html             open this
+  summary.txt
+  findings.json / .csv    normalized Nuclei + DAST candidates
+  assets/                 subdomains, hosts-live, urls, params, ports, tech, new-*
+  vulns/                  only non-empty: nuclei, xss, crlf, takeover, wpscan, secrets, cloud, sqli, cors
+  hygiene/                headers.tsv, waf.txt, tls-issues.txt
+  screenshots/
+  .evidence/              raw tool output + logs (hidden); nothing duplicated or empty surfaces above
+```
 
-Scanner results are candidates until manually validated; skipped/partial stages are not a clean bill of health.
+`assets/new-*.txt` list what is new since the last run (anew diff against `~/Automate/<domain>/.known/`).
+Empty files and empty category folders are pruned. Scanner results are candidates until manually
+validated; partial/skipped stages are not a clean bill of health.
+
+## Layout
+
+```
+automate.sh   orchestrator        config.sh   central config
+lib/core.sh   helpers, scope/IP, tool supervisor, selection, stages
+lib/discover.sh  subdomains, permutations, DNS, live hosts
+lib/collect.sh   waymore, katana, jsluice, trufflehog, inventory, parameters
+lib/enrich.sh    tech, TLS, headers, infra, ports, services, screenshots
+lib/scan.sh      waf, cors, takeover, crlf, gf triage, nuclei, dast, xss, sqli, fuzz, wordpress, cloud, vulnx
+lib/report.sh    anew diff + curate .evidence into the clean tree
+install.sh    one-time dependency setup (APT + Go + pipx + gf patterns + Nuclei/WPScan DB)
+```
+
+Optional, not auto-installed: **x8** (needs Rust: `cargo install x8`) is preferred over arjun for hidden
+parameters; **dnsReaper** (`pipx install git+https://github.com/punk-security/dnsReaper`) adds takeover
+signatures. Both are used automatically if present; otherwise arjun and Nuclei's takeover templates cover them.

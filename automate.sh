@@ -25,9 +25,9 @@ HTTPX_BIN=httpx-toolkit
 have "$HTTPX_BIN" || { have httpx && httpx -h 2>&1 | grep -q projectdiscovery && HTTPX_BIN=httpx; }
 
 REQUIRED=(jq curl awk sed grep sort timeout "$HTTPX_BIN")
-OPTIONAL=(subfinder assetfinder amass chaos alterx dnsx gau urlfinder waybackurls katana jsluice
-  cdncheck tlsx asnmap naabu nmap nuclei dalfox ffuf sqlmap arjun crlfuzz subjack wafw00f
-  whatweb testssl gowitness gf vulnx)
+OPTIONAL=(subfinder assetfinder amass chaos alterx dnsx waymore gau katana jsluice trufflehog
+  cdncheck tlsx asnmap naabu nmap nuclei dalfox ffuf sqlmap x8 arjun crlfuzz dnsreaper
+  wafw00f whatweb testssl gowitness gf wpscan s3scanner cloud_enum anew vulnx)
 if ((CHECK)); then
   printf '%-16s %-8s %s\n' TOOL STATUS PATH
   miss=0
@@ -43,11 +43,13 @@ fi
 DOMAIN=$(normalize_target "$TARGET") || die 'invalid target domain'
 for t in jq curl awk timeout sort "$HTTPX_BIN"; do have "$t" || die "missing required tool: $t (run ./install.sh)"; done
 
-RUN="$OUTPUT_ROOT/$DOMAIN/$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir -p "$RUN"/{raw,logs,reports}
-: >"$RUN/stages.tsv"; : >"$RUN/commands.tsv"
-: >"$RUN/parameters.hidden.txt"
-info "Automate | $DOMAIN | scope=$SCOPE_MODE | $RUN"
+# Visible run root holds curated deliverables; raw work hides in .evidence.
+RUN_ROOT="$OUTPUT_ROOT/$DOMAIN/$(date -u +%Y%m%dT%H%M%SZ)"
+RUN="$RUN_ROOT/.evidence"
+KNOWN="$OUTPUT_ROOT/$DOMAIN/.known"            # cross-run store for anew diffing
+mkdir -p "$RUN"/{raw,logs} "$RUN_ROOT"/{assets,vulns,hygiene} "$KNOWN"
+: >"$RUN/stages.tsv"; : >"$RUN/commands.tsv"; : >"$RUN/parameters.hidden.txt"
+info "Automate | $DOMAIN | scope=$SCOPE_MODE | $RUN_ROOT"
 info "perf: threads=$THREADS concurrency=$CONCURRENCY rate=$RATE timeout=${TIMEOUT}s"
 
 # Discovery
@@ -59,6 +61,7 @@ stage live          discover_live
 stage historical    collect_historical
 stage crawl         collect_crawl
 stage javascript    collect_javascript
+stage secrets       collect_secrets
 stage inventory     collect_inventory
 stage hidden_params scan_hidden_params
 stage parameters    collect_parameters
@@ -77,9 +80,14 @@ stage cors          scan_cors
 stage takeover      scan_takeover
 stage crlf          scan_crlf
 stage nuclei        scan_nuclei
+stage dast          scan_dast
 stage xss           scan_xss
 stage sqli          scan_sqli
 stage fuzz          scan_fuzz
+stage wordpress     scan_wordpress
+[[ $SCOPE_MODE == full ]] && stage cloud scan_cloud
 stage vulnx         scan_vulnx
+# Diff against previous runs
+stage diff          diff_new
 
 report
