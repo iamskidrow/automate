@@ -31,7 +31,7 @@ enrich_headers(){
   local url f
   while IFS= read -r url; do scope_url "$url" || continue
     f=$(mktemp)
-    curl -I -sS -D "$f" -o /dev/null --max-redirs 0 --connect-timeout 5 --max-time "$HTTP_TIMEOUT" "$url" 2>/dev/null || true
+    curl -I -sS -A "$UA" -D "$f" -o /dev/null --max-redirs 0 --connect-timeout 5 --max-time "$HTTP_TIMEOUT" "$url" 2>/dev/null || true
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$url" \
       "$(grep -qi '^strict-transport-security:' "$f" && echo y || echo n)" \
       "$(grep -qi '^content-security-policy:' "$f" && echo y || echo n)" \

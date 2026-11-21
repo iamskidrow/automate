@@ -23,6 +23,9 @@ NUCLEI_TAGS="${NUCLEI_TAGS:-cve,exposure,misconfig,tech,default-login,takeover}"
 NUCLEI_SEVERITY="${NUCLEI_SEVERITY:-critical,high,medium,low}"
 NUCLEI_EXCLUDE="${NUCLEI_EXCLUDE:-dos,fuzz,intrusive,bruteforce}"
 
+# Browser User-Agent — default curl UA is often blocked/challenged by WAFs/CDNs.
+UA="${UA:-Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36}"
+
 # Paths.
 OUTPUT_ROOT="${OUTPUT_ROOT:-$HOME/Automate}"
 WORDLIST="${WORDLIST:-/usr/share/wordlists/dirb/common.txt}"

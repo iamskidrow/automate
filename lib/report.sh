@@ -12,7 +12,7 @@ diff_new(){
 
 report(){
   local R="$RUN_ROOT" E="$RUN"
-  cp2(){ [[ -s $1 ]] && cp "$1" "$2"; }   # copy only when the source has content
+  cp2(){ [[ -s $1 ]] && grep -q '[^[:space:]]' "$1" 2>/dev/null && cp "$1" "$2"; }   # copy only when the source has real content
 
   # Normalized findings from Nuclei (templates + DAST).
   cat "$E/raw/nuclei.jsonl" "$E/raw/nuclei.dast.jsonl" 2>/dev/null >"$E/raw/nuclei.combined.jsonl"

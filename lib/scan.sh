@@ -12,7 +12,7 @@ scan_cors(){
   printf 'url\tstatus\treflects_origin\tallow_credentials\n' >"$RUN/cors.tsv"
   local url f code origin creds
   while IFS= read -r url; do scope_url "$url" || continue; f=$(mktemp)
-    code=$(curl -sS -D "$f" -o /dev/null --max-redirs 0 -m "$HTTP_TIMEOUT" -H 'Origin: https://evil.example' -w '%{http_code}' "$url" 2>/dev/null || true)
+    code=$(curl -sS -A "$UA" -D "$f" -o /dev/null --max-redirs 0 -m "$HTTP_TIMEOUT" -H 'Origin: https://evil.example' -w '%{http_code}' "$url" 2>/dev/null || true)
     origin=$(awk 'BEGIN{IGNORECASE=1}tolower($1)=="access-control-allow-origin:"{print $2;exit}' "$f" | tr -d '\r')
     creds=$(awk 'tolower($1)=="access-control-allow-credentials:"{print $2;exit}' "$f" | tr -d '\r')
     printf '%s\t%s\t%s\t%s\n' "$url" "$code" "$([[ $origin == https://evil.example ]] && echo yes || echo no)" "${creds:-none}" >>"$RUN/cors.tsv"
@@ -127,13 +127,21 @@ scan_fuzz(){
 # WordPress deep scan — only when WordPress is detected.
 scan_wordpress(){
   have wpscan || { skip 'wpscan missing'; return; }
-  grep -qiE 'wp-content|wp-json|wp-includes|wordpress' "$RUN/urls.all.txt" "$RUN/technologies.jsonl" 2>/dev/null \
-    || { skip 'no WordPress detected'; return; }
-  grep -iE 'wp-content|wp-json|wp-includes' "$RUN/urls.all.txt" 2>/dev/null | grep -hoE 'https?://[^/"]+' | sort -u | head -n 2 >"$RUN/wp.hosts"
-  [[ -s $RUN/wp.hosts ]] || head -n 1 "$RUN/hosts.live.txt" >"$RUN/wp.hosts"
+  : >"$RUN/wp.hosts"
+  # Primary: hosts fingerprinted as WordPress by httpx tech detection.
+  [[ -s $RUN/technologies.jsonl ]] && jq -r 'select((.tech//[])|map(ascii_downcase)|index("wordpress"))|.url' \
+    "$RUN/technologies.jsonl" 2>/dev/null | sort -u >"$RUN/wp.hosts"
+  # Fallback: hosts serving wp-* paths in the collected URLs.
+  [[ -s $RUN/wp.hosts ]] || grep -iE 'wp-content|wp-json|wp-includes' "$RUN/urls.all.txt" 2>/dev/null \
+    | grep -hoE 'https?://[^/"]+' | sort -u >"$RUN/wp.hosts"
+  [[ -s $RUN/wp.hosts ]] || { skip 'no WordPress detected'; return; }
+  head -n 3 "$RUN/wp.hosts" >"$RUN/wp.hosts.sel"; mv "$RUN/wp.hosts.sel" "$RUN/wp.hosts"
+  # vp/vt (vulnerable plugin/theme) enumeration needs a paid API token; fall back to free p,t,u.
+  local enum='p,t,u'; local -a tok=()
+  [[ -n ${WPSCAN_API_TOKEN:-} ]] && { enum='vp,vt,u'; tok=(--api-token "$WPSCAN_API_TOKEN"); }
   : >"$RUN/raw/wpscan.txt"; local u i=0
   while IFS= read -r u; do scope_url "$u" || continue; i=$((i+1))
-    run "$RUN/raw/wpscan_$i.out" "wpscan_$i" wpscan --url "$u" --no-banner --random-user-agent --enumerate vp,u --format cli
+    run "$RUN/raw/wpscan_$i.out" "wpscan_$i" wpscan --url "$u" --no-banner --random-user-agent --enumerate "$enum" "${tok[@]}" --format cli
     { printf '\n### %s ###\n' "$u"; cat "$RUN/raw/wpscan_$i.out"; } >>"$RUN/raw/wpscan.txt"
   done <"$RUN/wp.hosts"
   # wpscan exits nonzero for findings or "not WordPress"; only a missing-DB error is a real failure.

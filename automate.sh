@@ -51,6 +51,9 @@ mkdir -p "$RUN"/{raw,logs} "$RUN_ROOT"/{assets,vulns,hygiene} "$KNOWN"
 : >"$RUN/stages.tsv"; : >"$RUN/commands.tsv"; : >"$RUN/parameters.hidden.txt"
 info "Automate | $DOMAIN | scope=$SCOPE_MODE | $RUN_ROOT"
 info "perf: threads=$THREADS concurrency=$CONCURRENCY rate=$RATE timeout=${TIMEOUT}s"
+# Detach stdin: ProjectDiscovery tools (httpx, …) block on an open stdin even with -l.
+# Stages that need piped input redirect it explicitly, overriding this.
+exec </dev/null
 
 # Discovery
 stage subdomains    discover_subdomains

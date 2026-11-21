@@ -4,13 +4,15 @@
 # Historical URLs — waymore (6 archive sources) preferred, gau as fallback.
 collect_historical(){
   local raw="$RUN/raw"; : >"$raw/historical.raw"
+  local subs=''; [[ $SCOPE_MODE == full ]] && subs='--subs'
+  # gau is the reliable baseline; waymore adds extra archive sources when reachable.
+  if have gau; then
+    run "$raw/gau.txt" gau gau $subs --threads "$THREADS" --timeout "$HTTP_TIMEOUT" "$DOMAIN"
+    cat "$raw/gau.txt" >>"$raw/historical.raw" 2>/dev/null || true
+  fi
   if have waymore; then
     run "$raw/waymore.log" waymore waymore -i "$DOMAIN" -mode U -oU "$raw/waymore.urls"
     [[ -f $raw/waymore.urls ]] && cat "$raw/waymore.urls" >>"$raw/historical.raw"
-  elif have gau; then
-    local subs=''; [[ $SCOPE_MODE == full ]] && subs='--subs'
-    run "$raw/gau.txt" gau gau $subs --threads "$THREADS" --timeout "$HTTP_TIMEOUT" "$DOMAIN"
-    cat "$raw/gau.txt" >>"$raw/historical.raw" 2>/dev/null || true
   fi
   filter_urls "$raw/historical.raw" "$RUN/urls.historical.txt"
   info "historical URLs: $(count "$RUN/urls.historical.txt")"
@@ -23,7 +25,7 @@ collect_crawl(){
   run "$out" katana katana -list "$RUN/hosts.live.txt" \
     -d "$CRAWL_DEPTH" -jc -kf all -fs fqdn -c "$CONCURRENCY" -rl "$RATE" -timeout "$HTTP_TIMEOUT" \
     -or -ob -jsonl -silent
-  jq -Rr '(fromjson?//empty)|select(type=="object")|(.request.endpoint//.endpoint//empty)' "$out" 2>/dev/null >"$RUN/raw/crawl.raw"
+  jq -r '.request.endpoint // .endpoint // empty' "$out" 2>/dev/null | grep -vE '/cdn-cgi/' >"$RUN/raw/crawl.raw" || true
   filter_urls "$RUN/raw/crawl.raw" "$RUN/urls.crawl.txt"
   info "crawled URLs: $(count "$RUN/urls.crawl.txt")"
 }
@@ -37,7 +39,7 @@ collect_javascript(){
   mkdir -p "$RUN/raw/js"; local i=0 url
   : >"$RUN/raw/jsluice.paths"
   while IFS= read -r url; do scope_url "$url" || continue; i=$((i+1))
-    curl -sS --fail --max-time 12 --max-filesize 1048576 --max-redirs 0 "$url" -o "$RUN/raw/js/$i.js" 2>/dev/null || continue
+    curl -sSL --fail -A "$UA" --max-time 12 --max-filesize 2097152 --max-redirs 3 "$url" -o "$RUN/raw/js/$i.js" 2>/dev/null || continue
     jsluice urls -R "$url" "$RUN/raw/js/$i.js" 2>/dev/null | jq -r 'select(type=="object")|.url//empty' >>"$RUN/raw/jsluice.paths" || true
   done <"$RUN/js.selected.txt"
   filter_urls "$RUN/raw/jsluice.paths" "$RUN/urls.js.txt"

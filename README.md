@@ -31,6 +31,10 @@ THREADS=100 CONCURRENCY=50 RATE=200 TIMEOUT=2400 MAX_URLS=0 ./automate.sh target
 | `TIMEOUT` | wall-clock cap per tool |
 | `MAX_URLS` / `MAX_PARAMS` / `MAX_DNS` / `FUZZ_WORDS` | scope budgets (0 = unlimited) |
 | `NUCLEI_TAGS` / `NUCLEI_SEVERITY` | Nuclei coverage |
+| `UA` | browser User-Agent for content fetches (default curl UA is often WAF-blocked) |
+
+Set `WPSCAN_API_TOKEN` (free tier at wpscan.com) for vulnerable-plugin/theme lookups; without it,
+wpscan still enumerates plugins, themes and users.
 
 ## Pipeline
 
